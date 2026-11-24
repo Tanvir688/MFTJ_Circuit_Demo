@@ -8,6 +8,8 @@ The main traces and the inset come from a single 5 ms Spectre transient. [Downlo
 
 ## Circuit
 
+![One of four MFTJ read cells. A precharge switch connects a 200 mV supply to the bitline, which connects to a 1 pF capacitor and the MFTJ in parallel.](figures/rc_discharge_schematic.svg)
+
 Each cell has a 1 pF bitline capacitor, a 100 Ω precharge switch connected to a 200 mV supply, and a junction with an assumed area of 1.99 µm². The junction model includes its geometric capacitance. Spectre first solves the DC operating point with the switches closed. At 1 ns the switches open, and each bitline discharges through its junction.
 
 The four instances hold their polarization and magnetic alignment fixed during readout. The parameter `initial_sign` selects ON (+1) or OFF (−1). The parameter `alignment` selects parallel (+1) or antiparallel (−1). The read delay is the elapsed time from switch release to the first falling 100 mV bitline crossing.
