@@ -1,0 +1,351 @@
+`include "constants.vams"
+`include "disciplines.vams"
+
+// Calibrated static-read transport for the F3GT/CIPS/F5GT junction at 120 K.
+// Energy in eV, lengths in nm, current density in A/cm^2.
+// State parameters: initial_sign +1/-1 selects ON/OFF; alignment +1/-1 selects P/AP.
+// The transient branch also includes the junction geometric capacitance.
+module MFTJ_Tanvir_Equations(p,n);
+  inout p,n;
+  electrical p,n;
+
+  parameter real area_um2 = 1.99 from (0:inf);
+  parameter real thickness_nm = 5.1 from (0:inf);
+  parameter real eps_fe = 12.0 from (0:inf);
+  parameter real pr_uc_cm2 = 3.099540372073315 from [0:inf);
+  parameter integer initial_sign = 1;
+  parameter integer alignment = 1;
+  parameter real temperature_K = 120.0 from (0:inf);
+  parameter real ef1_ev = 0.6499932139276792 from (0:inf);
+  parameter real ef2_ev = 0.30569146110356477 from (0:inf);
+  parameter real delta1_ev = 0.5500275686842172 from [0:inf);
+  parameter real delta2_ev = 0.30002778011304465 from [0:inf);
+  parameter real mass1_m0 = 1.0 from (0:inf);
+  parameter real mass2_m0 = 1.0 from (0:inf);
+  parameter real tunnel_mass_m0 = 0.13000002485776935 from (0:inf);
+  parameter real phi1_ev = 0.7974159732600302;
+  parameter real phi2_ev = 1.0174159732600303;
+  // Set one of DOS/lambda for each electrode. Zero disables that option.
+  parameter real dos1_ev_cm2 = 2.0e15 from [0:inf);
+  parameter real lambda1_A = 0.0 from [0:inf);
+  parameter real dos2_ev_cm2 = 0.0 from [0:inf);
+  parameter real lambda2_A = 3.7215646806025213 from [0:inf);
+  parameter real period1_nm = 0.817 from (0:inf);
+  parameter real period2_nm = 0.973 from (0:inf);
+  parameter real eps_bg1 = 1.0 from (0:inf);
+  parameter real eps_bg2 = 1.0 from (0:inf);
+  parameter integer energy_order = 32 from [8:256];
+  parameter integer transverse_order = 48 from [8:256];
+  parameter integer barrier_slices = 128 from [8:1024];
+  parameter integer tail_slices = 64 from [8:512];
+  parameter real tail_lengths = 12.0 from [8:inf);
+  parameter real thermal_window = 30.0 from [20:inf);
+  parameter real thermal_split_kt = 8.0 from (0:inf);
+  parameter real turning_k_nm_inv = 1e-12 from (0:inf);
+
+  // Same SI constants as scipy.constants used by the parent Python model.
+  parameter real q_si = 1.602176634e-19 from (0:inf);
+  parameter real eps0_si = 8.8541878188e-12 from (0:inf);
+  parameter real h_si = 6.62607015e-34 from (0:inf);
+  parameter real hbar_si = 1.0545718176461565e-34 from (0:inf);
+  parameter real m0_si = 9.1093837139e-31 from (0:inf);
+  parameter real kb_si = 1.380649e-23 from (0:inf);
+  parameter real pi_const = 3.14159265358979323846 from (0:inf);
+
+  real j_transport, area_m2, cgeom;
+
+  analog function real logistic;
+    input x;
+    real x, ex;
+    begin
+      if (x >= 0.0) begin
+        ex = exp(-x);
+        logistic = 1.0/(1.0+ex);
+      end else begin
+        ex = exp(x);
+        logistic = ex/(1.0+ex);
+      end
+    end
+  endfunction
+
+  // Stable 1-exp(-x), x>=0. Keeps a nonzero derivative at x=0.
+  analog function real omexp;
+    input x;
+    real x;
+    begin
+      if (x < 0.001)
+        omexp = x*(1.0-x/2.0+x*x/6.0-x*x*x/24.0+x*x*x*x/120.0);
+      else
+        omexp = 1.0-exp(-x);
+    end
+  endfunction
+
+  // Gauss-Legendre node/weight generated from the Legendre recurrence.
+  // These are integration rules, not stored I-V samples.
+  analog function real gauss_value;
+    input order, index, want_weight;
+    integer order, index, want_weight, it, j;
+    real z, step, p1, p2, p3, dp;
+    begin
+      z = cos(pi_const*(index+0.75)/(order+0.5));
+      step = 1.0;
+      it = 0;
+      while ((it < 40) && (abs(step) > 2e-15)) begin
+        p1 = 1.0;
+        p2 = 0.0;
+        for (j=1; j<=order; j=j+1) begin
+          p3 = p2;
+          p2 = p1;
+          p1 = ((2.0*j-1.0)*z*p2-(j-1.0)*p3)/j;
+        end
+        dp = order*(z*p1-p2)/(z*z-1.0);
+        step = p1/dp;
+        z = z-step;
+        it = it+1;
+      end
+      p1 = 1.0;
+      p2 = 0.0;
+      for (j=1; j<=order; j=j+1) begin
+        p3 = p2;
+        p2 = p1;
+        p1 = ((2.0*j-1.0)*z*p2-(j-1.0)*p3)/j;
+      end
+      dp = order*(z*p1-p2)/(z*z-1.0);
+      if (want_weight == 0)
+        gauss_value = z;
+      else
+        gauss_value = 2.0/((1.0-z*z)*dp*dp);
+    end
+  endfunction
+
+  // return_mode=0: J [A/cm2]; =1: G/A [S/cm2] at zero bias only.
+  // All arrays have literal bounds for Spectre compatibility.
+  // Complex scattering quantities are represented by real/imaginary pairs.
+  analog function real landauer;
+    input bias, fe_sign, mag_sign, return_mode;
+    real bias;
+    integer fe_sign, mag_sign, return_mode;
+    integer i, j, kidx, sp, interval, ie, it, layer, count, jj;
+    real en[0:255], ew[0:255], tn[0:255], tw[0:255];
+    real points[0:13];
+    real pot[0:2047], masses[0:2047], widths[0:2047];
+    real l1, l2, c1, c2, cf, kt, alpha, pref, sigma, a, b;
+    real low, high, swap, spin, ul, ur, lo, hi, mid, half, center;
+    real energy, eweight, occ, tmax, transverse, leftarg, rightarg;
+    real wavearg, wr, wi, yr, yi, yp_r, yp_i, wp_r, wp_i, yright;
+    real den_r, den_i, norm, r_r, r_i, t_r, t_i, tb_r, tb_i;
+    real refl_r, refl_i, amp_r, amp_i, phase_r, phase_i, phase2_r, phase2_i;
+    real u_r, u_i, dr, di, v_r, v_i, num_r, num_i, tmp_r, tmp_i;
+    real result, transmission, velocity_ratio;
+    begin
+      alpha = hbar_si*hbar_si/(2.0*m0_si*q_si)*1e18;
+      pref = q_si*q_si/h_si*1e14/(4.0*pi_const);
+      kt = kb_si*temperature_K/q_si;
+      if (dos1_ev_cm2 > 0.0)
+        l1 = sqrt(eps0_si*eps_bg1/(q_si*dos1_ev_cm2*1e4/(period1_nm*1e-9)));
+      else
+        l1 = lambda1_A*1e-10;
+      if (dos2_ev_cm2 > 0.0)
+        l2 = sqrt(eps0_si*eps_bg2/(q_si*dos2_ev_cm2*1e4/(period2_nm*1e-9)));
+      else
+        l2 = lambda2_A*1e-10;
+      c1 = eps0_si*eps_bg1/l1;
+      c2 = eps0_si*eps_bg2/l2;
+      cf = eps0_si*eps_fe/(thickness_nm*1e-9);
+      sigma = (phi2_ev-phi1_ev-bias+fe_sign*pr_uc_cm2*0.01/cf)/(1.0/c1+1.0/cf+1.0/c2);
+      a = phi1_ev+sigma/c1;
+      b = phi2_ev-sigma/c2-bias;
+      low = min(0.0,-bias)-thermal_window*kt;
+      high = max(0.0,-bias)+thermal_window*kt;
+      points[0]=low;
+      points[1]=high;
+      points[2]=-ef1_ev-delta1_ev/2.0;
+      points[3]=-ef1_ev+delta1_ev/2.0;
+      points[4]=-bias-ef2_ev-mag_sign*delta2_ev/2.0;
+      points[5]=-bias-ef2_ev+mag_sign*delta2_ev/2.0;
+      points[6]=a;
+      points[7]=b;
+      points[8]=0.0;
+      points[9]=-bias;
+      points[10]=-thermal_split_kt*kt;
+      points[11]=thermal_split_kt*kt;
+      points[12]=-bias-thermal_split_kt*kt;
+      points[13]=-bias+thermal_split_kt*kt;
+      for (i=0; i<14; i=i+1)
+        points[i]=max(low,min(high,points[i]));
+      for (i=0; i<13; i=i+1) begin
+        for (j=i+1; j<14; j=j+1) begin
+          if (points[j] < points[i]) begin
+            swap=points[i]; points[i]=points[j]; points[j]=swap;
+          end
+        end
+      end
+      for (i=0; i<energy_order; i=i+1) begin
+        en[i]=gauss_value(energy_order,i,0);
+        ew[i]=gauss_value(energy_order,i,1);
+      end
+      for (i=0; i<transverse_order; i=i+1) begin
+        tn[i]=gauss_value(transverse_order,i,0);
+        tw[i]=gauss_value(transverse_order,i,1);
+      end
+      result=0.0;
+      count=2*tail_slices+barrier_slices;
+      for (sp=0; sp<2; sp=sp+1) begin
+        spin=1.0-2.0*sp;
+        ul=-ef1_ev-spin*delta1_ev/2.0;
+        ur=-bias-ef2_ev-spin*mag_sign*delta2_ev/2.0;
+        // Quadratic electrode meshes, matching the original midpoint profiles.
+        for (i=0; i<tail_slices; i=i+1) begin
+          jj=tail_slices-1-i;
+          lo=tail_lengths*pow(jj*1.0/tail_slices,2.0);
+          hi=tail_lengths*pow((jj+1.0)/tail_slices,2.0);
+          mid=(lo+hi)/2.0;
+          pot[i]=ul+sigma/c1*exp(-mid);
+          masses[i]=mass1_m0;
+          widths[i]=l1*1e9*(hi-lo);
+          lo=tail_lengths*pow(i*1.0/tail_slices,2.0);
+          hi=tail_lengths*pow((i+1.0)/tail_slices,2.0);
+          mid=(lo+hi)/2.0;
+          kidx=tail_slices+barrier_slices+i;
+          pot[kidx]=ur-sigma/c2*exp(-mid);
+          masses[kidx]=mass2_m0;
+          widths[kidx]=l2*1e9*(hi-lo);
+        end
+        for (i=0; i<barrier_slices; i=i+1) begin
+          kidx=tail_slices+i;
+          pot[kidx]=a+(b-a)*(i+0.5)/barrier_slices;
+          masses[kidx]=tunnel_mass_m0;
+          widths[kidx]=thickness_nm/barrier_slices;
+        end
+        for (interval=0; interval<13; interval=interval+1) begin
+          half=(points[interval+1]-points[interval])/2.0;
+          center=(points[interval+1]+points[interval])/2.0;
+          if (half > 0.0) begin
+            for (ie=0; ie<energy_order; ie=ie+1) begin
+              energy=center+half*en[ie];
+              eweight=half*ew[ie];
+              tmax=max(min(mass1_m0*(energy-ul)/alpha,mass2_m0*(energy-ur)/alpha),0.0);
+              if (return_mode == 1)
+                occ=logistic(-energy/kt)*logistic(energy/kt)/kt;
+              else if (bias >= 0.0)
+                occ=logistic(-energy/kt)*logistic((energy+bias)/kt)*omexp(bias/kt);
+              else
+                occ=-logistic((-bias-energy)/kt)*logistic(energy/kt)*omexp(-bias/kt);
+              if (tmax > 0.0) begin
+                for (it=0; it<transverse_order; it=it+1) begin
+                  transverse=tmax*(1.0+tn[it])/2.0;
+                  leftarg=mass1_m0*(energy-ul)/alpha-transverse;
+                  rightarg=mass2_m0*(energy-ur)/alpha-transverse;
+                  // Both reservoirs must have a propagating mode.
+                  if ((leftarg > 0.0) && (rightarg > 0.0)) begin
+                    yright=sqrt(rightarg)/mass2_m0;
+                    layer=count-1;
+                    wavearg=masses[layer]*(energy-pot[layer])/alpha-transverse;
+                    if (wavearg >= 0.0) begin
+                      wr=sqrt(wavearg); wi=0.0;
+                    end else begin
+                      wr=0.0; wi=sqrt(-wavearg);
+                    end
+                    if (wr+wi < turning_k_nm_inv) begin
+                      wr=turning_k_nm_inv; wi=0.0;
+                    end
+                    yr=wr/masses[layer]; yi=wi/masses[layer];
+                    den_r=yr+yright; den_i=yi;
+                    norm=den_r*den_r+den_i*den_i;
+                    refl_r=((yr-yright)*den_r+yi*den_i)/norm;
+                    refl_i=(yi*den_r-(yr-yright)*den_i)/norm;
+                    amp_r=(2.0*yr*den_r+2.0*yi*den_i)/norm;
+                    amp_i=(2.0*yi*den_r-2.0*yr*den_i)/norm;
+                    for (layer=count-1; layer>=0; layer=layer-1) begin
+                      // Only decaying exp(-Im(k)*d) factors, never growing ones.
+                      phase_r=exp(-wi*widths[layer])*cos(wr*widths[layer]);
+                      phase_i=exp(-wi*widths[layer])*sin(wr*widths[layer]);
+                      phase2_r=phase_r*phase_r-phase_i*phase_i;
+                      phase2_i=2.0*phase_r*phase_i;
+                      if (layer > 0) begin
+                        wavearg=masses[layer-1]*(energy-pot[layer-1])/alpha-transverse;
+                        if (wavearg >= 0.0) begin
+                          wp_r=sqrt(wavearg); wp_i=0.0;
+                        end else begin
+                          wp_r=0.0; wp_i=sqrt(-wavearg);
+                        end
+                        if (wp_r+wp_i < turning_k_nm_inv) begin
+                          wp_r=turning_k_nm_inv; wp_i=0.0;
+                        end
+                        yp_r=wp_r/masses[layer-1]; yp_i=wp_i/masses[layer-1];
+                      end else begin
+                        wp_r=sqrt(leftarg); wp_i=0.0;
+                        yp_r=wp_r/mass1_m0; yp_i=0.0;
+                      end
+                      den_r=yp_r+yr; den_i=yp_i+yi;
+                      norm=den_r*den_r+den_i*den_i;
+                      r_r=((yp_r-yr)*den_r+(yp_i-yi)*den_i)/norm;
+                      r_i=((yp_i-yi)*den_r-(yp_r-yr)*den_i)/norm;
+                      t_r=(2.0*yp_r*den_r+2.0*yp_i*den_i)/norm;
+                      t_i=(2.0*yp_i*den_r-2.0*yp_r*den_i)/norm;
+                      tb_r=(2.0*yr*den_r+2.0*yi*den_i)/norm;
+                      tb_i=(2.0*yi*den_r-2.0*yr*den_i)/norm;
+                      u_r=refl_r*phase2_r-refl_i*phase2_i;
+                      u_i=refl_r*phase2_i+refl_i*phase2_r;
+                      dr=1.0+r_r*u_r-r_i*u_i;
+                      di=r_r*u_i+r_i*u_r;
+                      norm=dr*dr+di*di;
+                      v_r=phase_r*amp_r-phase_i*amp_i;
+                      v_i=phase_r*amp_i+phase_i*amp_r;
+                      num_r=t_r*v_r-t_i*v_i;
+                      num_i=t_r*v_i+t_i*v_r;
+                      amp_r=(num_r*dr+num_i*di)/norm;
+                      amp_i=(num_i*dr-num_r*di)/norm;
+                      tmp_r=t_r*tb_r-t_i*tb_i;
+                      tmp_i=t_r*tb_i+t_i*tb_r;
+                      num_r=tmp_r*u_r-tmp_i*u_i;
+                      num_i=tmp_r*u_i+tmp_i*u_r;
+                      refl_r=r_r+(num_r*dr+num_i*di)/norm;
+                      refl_i=r_i+(num_i*dr-num_r*di)/norm;
+                      yr=yp_r; yi=yp_i; wr=wp_r; wi=wp_i;
+                    end
+                    velocity_ratio=(sqrt(rightarg)/mass2_m0)/(sqrt(leftarg)/mass1_m0);
+                    transmission=velocity_ratio*(amp_r*amp_r+amp_i*amp_i);
+                    // No transmission clipping, DOS multiplier or extra spin degeneracy.
+                    result=result+eweight*occ*tmax/2.0*tw[it]*transmission;
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+      landauer=pref*result;
+    end
+  endfunction
+
+  analog begin
+    @(initial_step) begin
+      if (((initial_sign != 1) && (initial_sign != -1)) ||
+          ((alignment != 1) && (alignment != -1))) begin
+        $strobe("ERROR MFTJ_Tanvir_Equations: initial_sign and alignment must each be +1 or -1.");
+        $finish;
+      end
+      if (((dos1_ev_cm2 > 0.0) && (lambda1_A > 0.0)) ||
+          ((dos1_ev_cm2 == 0.0) && (lambda1_A == 0.0)) ||
+          ((dos2_ev_cm2 > 0.0) && (lambda2_A > 0.0)) ||
+          ((dos2_ev_cm2 == 0.0) && (lambda2_A == 0.0))) begin
+        $strobe("ERROR MFTJ_Tanvir_Equations: set exactly one positive DOS or lambda per electrode.");
+        $finish;
+      end
+    end
+    // Reevaluate at every analog solve. No cached voltage/current or timer updates.
+    j_transport=landauer(V(p,n),initial_sign,alignment,0);
+    area_m2=area_um2*1e-12;
+    cgeom=eps0_si*eps_fe*area_m2/(thickness_nm*1e-9);
+    I(p,n) <+ area_um2*1e-8*j_transport;
+    I(p,n) <+ ddt(cgeom*V(p,n)+area_m2*initial_sign*pr_uc_cm2*0.01);
+  end
+endmodule
+
+module MFTJ_Tanvir_Precharge(p,n,en);
+  inout p,n; input en;
+  electrical p,n,en;
+  parameter real ron=1000 from (0:inf);
+  analog I(p,n) <+ (V(en)>0.5 ? V(p,n)/ron : 0.0);
+endmodule

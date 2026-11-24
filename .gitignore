@@ -1,0 +1,21 @@
+# Spectre run products and local Cadence configuration
+/rc_*_results/
+*.ahdlSimDB/
+*.raw/
+*.log
+*.measure
+*.mt0
+*.srf
+*.fc
+*.ic
+*.ahdlcmi
+input.scs.*
+spectre.out
+cds.lib
+cds.env
+.cdsenv
+.cdsinit
+hdl.var
+*.lck
+__pycache__/
+.venv/

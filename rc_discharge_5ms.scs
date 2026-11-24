@@ -1,0 +1,48 @@
+simulator lang=spectre
+global 0
+
+// Four-state MFTJ bitline read. Run in the directory containing mftj_equations.va:
+// spectre rc_discharge_5ms.scs -format psfascii -raw rc_5ms_results +log rc_5ms.log
+ahdl_include "./mftj_equations.va"
+
+parameters vpre=0.200 vtrip=0.100 cbl=1p area_um2_demo=1.99 ron_pre=100
+// Integration orders and spatial mesh for this 120 K discharge demo.
+// To use the full Python resolution, set nq_e=32 nq_t=48 nbar=128 ntail=64.
+parameters nq_e=8 nq_t=12 nbar=32 ntail=32
+
+// The initial DC solve finds each settled bitline voltage with its switch closed.
+// The switch opens at the explicit 0.5 V breakpoint at 1 ns.
+Vsupply (supply 0) vsource dc=vpre
+Vprectl (pre 0) vsource type=pwl dc=1 wave=[0 1 1n 0.5 2n 0]
+
+subckt read_cell (bl supply pre)
+    parameters fe_sign=1 mag_sign=1
+    Spre (supply bl pre) MFTJ_Tanvir_Precharge ron=ron_pre
+    Cbit (bl 0) capacitor c=cbl
+    // Positive BL gives negative junction bias. The VA includes junction capacitance.
+    Xj (0 bl) MFTJ_Tanvir_Equations area_um2=area_um2_demo \
+        initial_sign=fe_sign alignment=mag_sign \
+        energy_order=nq_e transverse_order=nq_t barrier_slices=nbar tail_slices=ntail
+ends read_cell
+
+Xonp   (bl_on_p   supply pre) read_cell fe_sign=1  mag_sign=1
+Xonap  (bl_on_ap  supply pre) read_cell fe_sign=1  mag_sign=-1
+Xoffp  (bl_off_p  supply pre) read_cell fe_sign=-1 mag_sign=1
+Xoffap (bl_off_ap supply pre) read_cell fe_sign=-1 mag_sign=-1
+
+simulatorOptions options temp=-153.15 tnom=-153.15 reltol=1e-4 \
+    vabstol=100n iabstol=1f gmin=1e-15 cmin=0
+saveOptions options save=selected
+save pre bl_on_p bl_on_ap bl_off_p bl_off_ap
+tran1 tran stop=5m maxstep=5u skipdc=no errpreset=moderate method=gear2only
+
+// Elapsed seconds from switch opening to the first falling bitline threshold crossing.
+simulator lang=spice
+.measure tran delay_on_p   TRIG V(pre) VAL=0.5 FALL=1 TARG V(bl_on_p)   VAL='vtrip' FALL=1
+.measure tran delay_on_ap  TRIG V(pre) VAL=0.5 FALL=1 TARG V(bl_on_ap)  VAL='vtrip' FALL=1
+.measure tran delay_off_p  TRIG V(pre) VAL=0.5 FALL=1 TARG V(bl_off_p)  VAL='vtrip' FALL=1
+.measure tran delay_off_ap TRIG V(pre) VAL=0.5 FALL=1 TARG V(bl_off_ap) VAL='vtrip' FALL=1
+// OFF-state settling to 1 mV after release.
+.measure tran settle_off_p  TRIG V(pre) VAL=0.5 FALL=1 TARG V(bl_off_p)  VAL=1m FALL=1
+.measure tran settle_off_ap TRIG V(pre) VAL=0.5 FALL=1 TARG V(bl_off_ap) VAL=1m FALL=1
+simulator lang=spectre
