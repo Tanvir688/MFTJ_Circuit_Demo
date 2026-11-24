@@ -1,4 +1,4 @@
-"""Regenerate the published figure from the two example Spectre runs."""
+"""Regenerate the published figure from the loose 5 ms Spectre run."""
 from pathlib import Path
 import re
 
@@ -59,10 +59,9 @@ def style_axes(ax):
 
 
 def draw_figure():
-    time, voltage, delay = read_run("rc_5ms_results", "rc_discharge_5ms.measure",
-                                    ("on_p", "on_ap", "off_p", "off_ap"))
-    tight_time, tight_voltage, tight_delay = read_run(
-        "rc_tight_results", "rc_discharge_tight.measure", ("on_p", "on_ap"))
+    time, voltage, delay = read_run(
+        "rc_loose_results", "rc_discharge_loose.measure", ("on_p", "on_ap", "off_p", "off_ap")
+    )
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10.5, "svg.fonttype": "none",
                          "axes.spines.top": False, "axes.spines.right": False})
     fig = plt.figure(figsize=(10.4, 5.05), facecolor="white")
@@ -108,13 +107,14 @@ def draw_figure():
                     loc="left", pad=5, color=INK)
     for alignment, (color, line, marker, _) in STYLES.items():
         state = f"on_{alignment}"
-        inset.plot(tight_time, tight_voltage[state], color=color, ls=line, lw=1.85)
-        inset.plot(tight_delay[state], 100, marker=marker, color=color,
+        inset.plot(time, voltage[state], color=color, ls=line, lw=1.85)
+        inset.plot(delay[state], 100, marker=marker, color=color,
                    mfc="white", ms=5.3, mew=1.35, zorder=4)
-    p, ap = tight_delay["on_p"], tight_delay["on_ap"]
+    p, ap = delay["on_p"], delay["on_ap"]
     inset.set_xticks([p, ap], labels=[f"{p:.2f} ns", f"{ap:.2f} ns"])
     inset.tick_params(labelsize=8.5, pad=2)
-    inset.text(0.96, 0.86, f"Δt = {ap - p:.3f} ns", ha="right",
+    # Truncate the displayed gap to hundredths of a nanosecond.
+    inset.text(0.96, 0.86, f"Δt = {np.floor((ap - p) * 100) / 100:.2f} ns", ha="right",
                transform=inset.transAxes, color=INK, weight="bold", fontsize=9)
     on_center = (delay["on_p"] + delay["on_ap"]) / 2
     ax.plot(on_center, 100, "o", ms=12, mfc="none", mec=INK, mew=1.1, zorder=6)

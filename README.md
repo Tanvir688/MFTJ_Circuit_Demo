@@ -4,7 +4,7 @@ This four-cell read circuit demonstrates an equation-based Verilog-A compact mod
 
 ![Simulated bitline discharge for four MFTJ states. A zoomed inset shows the parallel and antiparallel ON states crossing 100 mV about 1.71 ns apart.](figures/mftj_bitline_discharge_5ms.png)
 
-The main traces come from a 5 ms Spectre transient. The inset comes from a second, 120 ns transient with tighter time stepping. [Download the vector figure](figures/mftj_bitline_discharge_5ms.svg).
+The main traces and the inset come from a single 5 ms Spectre transient. [Download the vector figure](figures/mftj_bitline_discharge_5ms.svg).
 
 ## Circuit
 
@@ -14,32 +14,31 @@ The four instances hold their polarization and magnetic alignment fixed during r
 
 ## Run the example
 
-Use a Linux shell with a licensed Cadence Spectre installation and its Verilog-A compiler available. Run both commands from the repository root. Both decks load the same local [Verilog-A model](mftj_equations.va).
+Use a Linux shell with a licensed Cadence Spectre installation and its Verilog-A compiler available. Run the commands from the repository root. The [5 ms deck](rc_discharge_loose.scs) loads the local [Verilog-A model](mftj_equations.va).
 
 ```bash
-spectre rc_discharge_5ms.scs -format psfascii -raw rc_5ms_results +log rc_5ms.log
-spectre rc_discharge_tight.scs -format psfascii -raw rc_tight_results +log rc_tight.log
-cat rc_discharge_5ms.measure rc_discharge_tight.measure
+spectre rc_discharge_loose.scs -format psfascii -raw rc_loose_results +log rc_loose.log
+cat rc_discharge_loose.measure
 ```
 
-The [5 ms deck](rc_discharge_5ms.scs) measures all four 100 mV crossings and the OFF states' 1 mV settling times. The [120 ns deck](rc_discharge_tight.scs) uses a 200 ps maximum time step and a relative tolerance of 10⁻⁶ to resolve the closest pair. Both use 8 energy nodes per subinterval, 12 transverse nodes, 32 barrier slices and 32 slices per electrode tail.
+The deck measures all four 100 mV crossings, both P–AP delay gaps, and the OFF states' 1 mV settling times. It uses a relative tolerance of 10⁻³, with a maximum time step of 500 ps from 65 to 100 ns and 50 µs after 350 µs. The transport calculation uses 8 energy nodes per subinterval, 12 transverse nodes, 32 barrier slices, and 32 slices per electrode tail.
 
 ## Reference results
 
-The following are nominal simulation results from Spectre 25.1.0.470.isr13 with the supplied parameters.
+The reference run used Spectre 25.1.0.470.isr13, finished in 42.5 seconds of wall time on the reference machine, and accepted 251 transient steps.
 
-| State | Delay to 100 mV, 5 ms run | Delay to 100 mV, tight run |
-|---|---:|---:|
-| ON/P | 84.052 ns | 85.066 ns |
-| ON/AP | 85.812 ns | 86.778 ns |
-| OFF/P | 230.985 µs | — |
-| OFF/AP | 288.634 µs | — |
+| State | Delay to 100 mV |
+|---|---:|
+| ON/P | 84.668 ns |
+| ON/AP | 86.387 ns |
+| OFF/P | 230.806 µs |
+| OFF/AP | 288.476 µs |
 
-The P–AP separation is **1.712 ns** in the ON state (tight run) and **57.65 µs** in the OFF state (5 ms run). The OFF/P and OFF/AP bitlines reach 1 mV after 2.294 ms and 2.913 ms, respectively. These delays describe the simulated circuit at nominal conditions.
+The measured AP-minus-P delay is **1.71866 ns** in the ON state and **57.6694 µs** in the OFF state. The figure truncates the ON inset label to **1.71 ns**. The OFF/P and OFF/AP bitlines reach 1 mV after 2.285 ms and 2.905 ms, respectively.
 
 ## Regenerate the figure
 
-After both runs, use Python 3 with NumPy and Matplotlib installed. The script reads the two PSF ASCII waveforms and their Spectre measurements and writes the PNG and SVG to `figures/`.
+After the run, use Python 3 with NumPy and Matplotlib installed. The script reads the PSF ASCII waveform and Spectre measurements and writes the PNG and SVG to `figures/`.
 
 ```bash
 python3 plot_discharge.py
