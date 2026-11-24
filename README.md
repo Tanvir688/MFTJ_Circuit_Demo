@@ -8,7 +8,7 @@ The main traces and the inset come from a single 5 ms Spectre transient. [Downlo
 
 ## Circuit
 
-![One of four MFTJ read cells. A precharge switch connects a 200 mV supply to the bitline, which connects to a 1 pF capacitor and the MFTJ in parallel.](figures/rc_discharge_schematic.svg)
+![One of four MFTJ read cells. A precharge switch connects a 200 mV supply to the bitline, which connects to a 1 pF capacitor and the MFTJ in parallel.](figures/rc_discharge_schematic.png)
 
 Each cell has a 1 pF bitline capacitor, a 100 Ω precharge switch connected to a 200 mV supply, and a junction with an assumed area of 1.99 µm². The junction model includes its geometric capacitance. Spectre first solves the DC operating point with the switches closed. At 1 ns the switches open, and each bitline discharges through its junction.
 
