@@ -14,11 +14,11 @@ The four instances hold their polarization and magnetic alignment fixed during r
 
 ## Run the example
 
-Use a Linux shell with a licensed Cadence Spectre installation and its Verilog-A compiler available. Run the commands from the repository root. The [5 ms deck](rc_discharge_loose.scs) loads the local [Verilog-A model](mftj_equations.va).
+Use a Linux shell with a licensed Cadence Spectre installation and its Verilog-A compiler available. Run the commands from the repository root. The [5 ms deck](rc_discharge.scs) loads the local [Verilog-A model](mftj_equations.va).
 
 ```bash
-spectre rc_discharge_loose.scs -format psfascii -raw rc_loose_results +log rc_loose.log
-cat rc_discharge_loose.measure
+spectre rc_discharge.scs -format psfascii -raw rc_discharge_results +log rc_discharge.log
+cat rc_discharge.measure
 ```
 
 The deck measures all four 100 mV crossings, both P–AP delay gaps, and the OFF states' 1 mV settling times. It uses a relative tolerance of 10⁻³, with a maximum time step of 500 ps from 65 to 100 ns and 50 µs after 350 µs. The transport calculation uses 8 energy nodes per subinterval, 12 transverse nodes, 32 barrier slices, and 32 slices per electrode tail.

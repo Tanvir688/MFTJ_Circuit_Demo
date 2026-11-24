@@ -2,7 +2,7 @@ simulator lang=spectre
 global 0
 
 // Four-state, single-run bitline discharge. Run from the repository root.
-// spectre rc_discharge_loose.scs -format psfascii -raw rc_loose_results +log rc_loose.log
+// spectre rc_discharge.scs -format psfascii -raw rc_discharge_results +log rc_discharge.log
 ahdl_include "./mftj_equations.va"
 
 parameters vpre=0.200 vtrip=0.100 cbl=1p area_um2_demo=1.99 ron_pre=100

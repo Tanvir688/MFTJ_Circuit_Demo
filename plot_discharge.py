@@ -1,4 +1,4 @@
-"""Regenerate the published figure from the loose 5 ms Spectre run."""
+"""Regenerate the published figure from the 5 ms RC discharge simulation."""
 from pathlib import Path
 import re
 
@@ -60,7 +60,7 @@ def style_axes(ax):
 
 def draw_figure():
     time, voltage, delay = read_run(
-        "rc_loose_results", "rc_discharge_loose.measure", ("on_p", "on_ap", "off_p", "off_ap")
+        "rc_discharge_results", "rc_discharge.measure", ("on_p", "on_ap", "off_p", "off_ap")
     )
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10.5, "svg.fonttype": "none",
                          "axes.spines.top": False, "axes.spines.right": False})
